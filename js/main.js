@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js?v=7';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=7';
-import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=7';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=8';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=8';
+import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=8';
+import { createAtoms, atomEpochInfo, formatAtomTime, ATOM_LOG_MIN, ATOM_LOG_MAX } from './atoms.js?v=8';
 
 // ---------- レンダラー ----------
 const canvas = document.getElementById('view');
@@ -45,6 +46,17 @@ universeControls.minDistance = 0.3; // 銀河1つ1つに寄れる
 universeControls.maxDistance = 500;
 universeControls.enabled = false;
 
+// ---------- 原子の誕生シーン ----------
+const atoms = createAtoms();
+
+const atomsCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 1000);
+atomsCam.position.set(0, 7, 30);
+const atomsControls = new OrbitControls(atomsCam, canvas);
+atomsControls.enableDamping = true;
+atomsControls.minDistance = 4;
+atomsControls.maxDistance = 90;
+atomsControls.enabled = false;
+
 // ---------- 状態 ----------
 let mode = 'solar';          // 'solar' | 'galaxy' | 'universe'
 let solarPlaying = true;
@@ -54,6 +66,9 @@ const GALAXY_RANGE = 3000;
 const GALAXY_RATE = 80;      // 再生速度 80百万年/秒
 let universePlaying = false;
 let universeS = 0;           // 宇宙の歴史スライダー位置 (0〜1)
+let atomsPlaying = false;
+let atomsS = 0;              // 原子の誕生スライダー位置 (0〜1)
+const atomsSliderToYears = (s) => Math.pow(10, ATOM_LOG_MIN + s * (ATOM_LOG_MAX - ATOM_LOG_MIN));
 let followKey = null;        // 追従中の天体キー
 const BASE_DATE = new Date(); // 「現在」の基準
 
@@ -89,6 +104,7 @@ const speedSelect = $('speed-select');
 const galaxySpeedSelect = $('galaxy-speed-select');
 const galaxySlider = $('galaxy-slider');
 const universeSlider = $('universe-slider');
+const atomsSlider = $('atoms-slider');
 const epochDisplay = $('epoch-display');
 const nowBtn = $('now-btn');
 const resetBtn = $('reset-btn');
@@ -154,11 +170,17 @@ function updateTimeDisplay() {
     timeDisplay.textContent = formatSolarTime(solar.time);
   } else if (mode === 'galaxy') {
     timeDisplay.textContent = formatGalaxyTime(galaxyTime);
-  } else {
+  } else if (mode === 'universe') {
     const t = sliderToGyr(universeS);
     timeDisplay.textContent = formatUniverseTime(t);
     const epoch = epochInfo(t);
     epochDisplay.innerHTML = `<b>${epoch.title}</b> ${epoch.desc}`;
+  } else {
+    const t = atomsSliderToYears(atomsS);
+    timeDisplay.textContent = formatAtomTime(t);
+    const epoch = atomEpochInfo(t);
+    epochDisplay.innerHTML = `<b>${epoch.title}</b> ${epoch.desc}`
+      + '<br>🔴陽子 ⚪中性子 🔵電子 🟡光';
   }
 }
 
@@ -166,7 +188,8 @@ function updateTimeDisplay() {
 function isPlaying() {
   if (mode === 'solar') return solarPlaying;
   if (mode === 'galaxy') return galaxyPlaying;
-  return universePlaying;
+  if (mode === 'universe') return universePlaying;
+  return atomsPlaying;
 }
 
 function updatePlayBtn() {
@@ -180,12 +203,15 @@ function setMode(next) {
   const isSolar = mode === 'solar';
   const isGalaxy = mode === 'galaxy';
   const isUniverse = mode === 'universe';
+  const isAtoms = mode === 'atoms';
   $('tab-solar').classList.toggle('active', isSolar);
   $('tab-galaxy').classList.toggle('active', isGalaxy);
   $('tab-universe').classList.toggle('active', isUniverse);
+  $('tab-atoms').classList.toggle('active', isAtoms);
   solarControls.enabled = isSolar;
   galaxyControls.enabled = isGalaxy;
   universeControls.enabled = isUniverse;
+  atomsControls.enabled = isAtoms;
   // UIの出し分け
   panelToggle.classList.toggle('hidden', !isSolar);
   speedSelect.classList.toggle('hidden', !isSolar);
@@ -193,9 +219,10 @@ function setMode(next) {
   clearTrailsBtn.classList.toggle('hidden', !isSolar);
   galaxySlider.classList.toggle('hidden', !isGalaxy);
   galaxySpeedSelect.classList.toggle('hidden', isSolar);
-  nowBtn.classList.toggle('hidden', isSolar);
+  nowBtn.classList.toggle('hidden', !isGalaxy && !isUniverse);
   universeSlider.classList.toggle('hidden', !isUniverse);
-  epochDisplay.classList.toggle('hidden', !isUniverse);
+  atomsSlider.classList.toggle('hidden', !isAtoms);
+  epochDisplay.classList.toggle('hidden', !isUniverse && !isAtoms);
   if (!isSolar) planetPanel.classList.add('hidden');
   updatePlayBtn();
   updateTimeDisplay();
@@ -204,15 +231,19 @@ function setMode(next) {
 $('tab-solar').addEventListener('click', () => setMode('solar'));
 $('tab-galaxy').addEventListener('click', () => setMode('galaxy'));
 $('tab-universe').addEventListener('click', () => setMode('universe'));
+$('tab-atoms').addEventListener('click', () => setMode('atoms'));
 
 // ---------- 再生コントロール ----------
 playBtn.addEventListener('click', () => {
   if (mode === 'solar') solarPlaying = !solarPlaying;
   else if (mode === 'galaxy') galaxyPlaying = !galaxyPlaying;
-  else {
+  else if (mode === 'universe') {
     // 終端で再生したら最初(ビッグバン)から
     if (!universePlaying && universeS >= 0.999) universeS = 0;
     universePlaying = !universePlaying;
+  } else {
+    if (!atomsPlaying && atomsS >= 0.999) atomsS = 0;
+    atomsPlaying = !atomsPlaying;
   }
   updatePlayBtn();
 });
@@ -252,6 +283,11 @@ nowBtn.addEventListener('click', () => {
 universeSlider.addEventListener('input', () => {
   universeS = parseFloat(universeSlider.value);
   universe.setTime(sliderToGyr(universeS));
+  updateTimeDisplay();
+});
+
+atomsSlider.addEventListener('input', () => {
+  atomsS = parseFloat(atomsSlider.value);
   updateTimeDisplay();
 });
 
@@ -490,7 +526,7 @@ function animate() {
     }
     galaxyControls.update();
     renderer.render(galaxyScene, galaxyCam);
-  } else {
+  } else if (mode === 'universe') {
     if (universePlaying) {
       // スライダー空間を一定速度で進む(全史をちょうどいいテンポで再生)
       universeS += 0.022 * parseFloat(galaxySpeedSelect.value) * dt;
@@ -501,12 +537,22 @@ function animate() {
     }
     universeControls.update();
     renderer.render(universe.scene, universeCam);
+  } else {
+    if (atomsPlaying) {
+      atomsS += 0.03 * parseFloat(galaxySpeedSelect.value) * dt;
+      if (atomsS >= 1) { atomsS = 1; atomsPlaying = false; updatePlayBtn(); }
+      atomsSlider.value = atomsS;
+      updateTimeDisplay();
+    }
+    atoms.update(clock.elapsedTime, atomsSliderToYears(atomsS));
+    atomsControls.update();
+    renderer.render(atoms.scene, atomsCam);
   }
 }
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  for (const cam of [solarCam, galaxyCam, universeCam]) {
+  for (const cam of [solarCam, galaxyCam, universeCam, atomsCam]) {
     cam.aspect = window.innerWidth / window.innerHeight;
     cam.updateProjectionMatrix();
   }

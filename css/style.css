@@ -44,6 +44,8 @@ html, body {
 
 #mode-tabs {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   pointer-events: auto;
 }
@@ -113,7 +115,7 @@ html, body {
   color: #cfe1ff;
 }
 
-#galaxy-slider, #universe-slider {
+#galaxy-slider, #universe-slider, #atoms-slider {
   width: 100%;
   accent-color: #5b8cff;
   height: 26px;
