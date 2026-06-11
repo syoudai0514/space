@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js?v=3';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=3';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=4';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=4';
 
 // ---------- レンダラー ----------
 const canvas = document.getElementById('view');
@@ -67,6 +67,10 @@ const distValue = $('dist-value');
 const exaggSlider = $('exagg-slider');
 const exaggValue = $('exagg-value');
 const followBtn = $('follow-btn');
+const circularizeBtn = $('circularize-btn');
+const swapField = $('swap-field');
+const swapSelect = $('swap-select');
+const swapBtn = $('swap-btn');
 
 // 天体セレクトを構築
 for (const b of solar.bodies) {
@@ -222,11 +226,25 @@ function refreshPanel() {
   exaggValue.textContent = `×${Math.round(solar.exaggeration)}`;
   exaggSlider.value = Math.log10(solar.exaggeration);
   const isSun = b.key === 'sun';
-  distField.classList.toggle('hidden', isSun);
-  if (!isSun && b.alive) {
+  const planetEditable = !isSun && b.alive;
+  distField.classList.toggle('hidden', !planetEditable);
+  circularizeBtn.classList.toggle('hidden', !planetEditable);
+  swapField.classList.toggle('hidden', !planetEditable);
+  if (planetEditable) {
     const r = b.pos.distanceTo(solar.bodies[0].pos);
     distSlider.value = Math.log10(Math.max(r, 0.05));
     distValue.textContent = `${r.toFixed(2)} AU`;
+    // 入れ替え相手のセレクトを作り直す(自分と太陽と消滅した惑星は除く)
+    const prev = swapSelect.value;
+    swapSelect.innerHTML = '';
+    for (const other of solar.bodies) {
+      if (other.key === 'sun' || other.key === b.key || !other.alive) continue;
+      const opt = document.createElement('option');
+      opt.value = other.key;
+      opt.textContent = other.name;
+      swapSelect.appendChild(opt);
+    }
+    if ([...swapSelect.options].some((o) => o.value === prev)) swapSelect.value = prev;
   }
   updateFollowBtn();
   refreshInfo();
@@ -259,6 +277,22 @@ exaggSlider.addEventListener('input', () => {
   const e = Math.pow(10, parseFloat(exaggSlider.value));
   solar.setExaggeration(e);
   exaggValue.textContent = `×${Math.round(e)}`;
+});
+
+circularizeBtn.addEventListener('click', () => {
+  const b = solar.getBody(bodySelect.value);
+  solar.circularize(b.key);
+  toast(`⭕ ${b.name}を円軌道に乗せました`);
+  refreshPanel();
+});
+
+swapBtn.addEventListener('click', () => {
+  const a = solar.getBody(bodySelect.value);
+  const b = solar.getBody(swapSelect.value);
+  if (!b) return;
+  solar.swapBodies(a.key, b.key);
+  toast(`🔄 ${a.name}と${b.name}の場所を入れ替えました`);
+  refreshPanel();
 });
 
 // ---------- 追従カメラ ----------

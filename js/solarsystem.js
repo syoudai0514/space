@@ -17,7 +17,7 @@ const DT_BASE = 2e-3;                 // 基本の刻み幅(年)
 const ETA = 8e-3;                     // 適応刻み係数: dt = ETA / √aMax
 const MAX_STEPS = 3000;               // 1フレームあたりの最大サブステップ数
 const ESCAPE_DIST = 150;              // これ以上離れたら「飛び去った」扱い(AU)
-const TRAIL_MAX = 1500;               // 軌跡の最大頂点数
+const TRAIL_MAX = 12000;              // 軌跡の最大頂点数(超えたら間引いて全履歴を保持)
 
 // 半径は実測値(km)、質量は太陽質量単位、a は軌道長半径(AU)。
 // サイズ比は太陽も含めてすべて本物どおり。
@@ -302,7 +302,45 @@ export class SolarSystem {
     if (rel.lengthSq() < 1e-12) rel.set(1, 0, 0);
     rel.setLength(au);
     b.pos.copy(sun.pos).add(rel);
+    b.escaped = au > ESCAPE_DIST;
     this.clearTrail(key);
+  }
+
+  // 今いる位置を保ったまま、安定した円軌道に乗る速度を与え直す。
+  // ドラッグや距離変更で乱れた惑星を落ち着かせるのに使う
+  circularize(key) {
+    const b = this.getBody(key);
+    const sun = this.bodies[0];
+    if (!b.alive || b.key === 'sun') return;
+    const rel = b.pos.clone().sub(sun.pos);
+    const r = rel.length();
+    if (r < 1e-9) return;
+    // いまの軌道面・公転方向を保つ。ほぼ直線落下中なら水平面を使う
+    const axis = rel.clone().cross(b.vel.clone().sub(sun.vel));
+    if (axis.lengthSq() < 1e-12) axis.set(0, 1, 0);
+    axis.normalize();
+    const tangent = axis.cross(rel).normalize();
+    const v = Math.sqrt(G * (this.effMass(sun) + this.effMass(b)) / r);
+    b.vel.copy(sun.vel).addScaledVector(tangent, v);
+    b.escaped = r > ESCAPE_DIST;
+    this.clearTrail(key);
+  }
+
+  // 2つの惑星の位置と速度をまるごと交換する。
+  // 公転速度は惑星自身の質量にほぼよらないので、円軌道どうしなら安定したまま
+  swapBodies(keyA, keyB) {
+    const a = this.getBody(keyA);
+    const b = this.getBody(keyB);
+    if (!a.alive || !b.alive || a === b) return;
+    const p = a.pos.clone();
+    a.pos.copy(b.pos);
+    b.pos.copy(p);
+    const v = a.vel.clone();
+    a.vel.copy(b.vel);
+    b.vel.copy(v);
+    [a.escaped, b.escaped] = [b.escaped, a.escaped];
+    this.clearTrail(keyA);
+    this.clearTrail(keyB);
   }
 
   // ドラッグ移動: 表示座標で位置を直接指定(速度はそのまま)
@@ -329,9 +367,16 @@ export class SolarSystem {
       : Math.max(0.02, b.pos.distanceTo(this.bodies[0].pos) * POS_SCALE * 0.025);
     if (b.lastTrail && b.lastTrail.distanceTo(p) < step) return;
     if (b.trailCount === TRAIL_MAX) {
-      // 満杯になったら前半分を捨てる
-      b.trailAttr.array.copyWithin(0, (TRAIL_MAX / 2) * 3);
-      b.trailCount = TRAIL_MAX / 2;
+      // 満杯になっても軌跡は消さない。1点おきに間引いて全履歴を残す
+      // (古い部分の点がすこし粗くなるだけ)
+      const arr = b.trailAttr.array;
+      const half = TRAIL_MAX >> 1;
+      for (let i = 1; i < half; i++) {
+        arr[i * 3] = arr[i * 6];
+        arr[i * 3 + 1] = arr[i * 6 + 1];
+        arr[i * 3 + 2] = arr[i * 6 + 2];
+      }
+      b.trailCount = half;
     }
     b.trailAttr.setXYZ(b.trailCount, p.x, p.y, p.z);
     b.trailCount++;

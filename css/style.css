@@ -254,6 +254,24 @@ html, body {
   cursor: pointer;
 }
 
+.swap-row {
+  display: flex;
+  gap: 6px;
+}
+
+.swap-row select { flex: 1; }
+
+.swap-row button {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 190, 100, 0.5);
+  border-radius: 8px;
+  background: rgba(150, 90, 20, 0.5);
+  color: #ffe3b8;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .action.secondary {
   border-color: rgba(130, 170, 255, 0.4);
   background: rgba(25, 40, 80, 0.9);
