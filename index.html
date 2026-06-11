@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>太陽系シミュレーター 3D</title>
   <!-- ?v= はキャッシュ対策のバージョン番号。デプロイのたびに上げる -->
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
   <script type="importmap">
   {
     "imports": {
@@ -24,6 +24,7 @@
     <div id="mode-tabs">
       <button id="tab-solar" class="tab active">太陽系</button>
       <button id="tab-galaxy" class="tab">銀河系</button>
+      <button id="tab-universe" class="tab">宇宙の歴史</button>
     </div>
   </div>
 
@@ -85,7 +86,9 @@
   <!-- 時間コントロール -->
   <div id="time-bar">
     <div id="time-display">現在</div>
+    <div id="epoch-display" class="hidden"></div>
     <input type="range" id="galaxy-slider" class="hidden" min="-3000" max="3000" step="5" value="0">
+    <input type="range" id="universe-slider" class="hidden" min="0" max="1" step="0.0005" value="0">
     <div id="time-buttons">
       <button id="play-btn" class="playing">⏸ 停止</button>
       <select id="speed-select">
@@ -109,6 +112,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=5"></script>
+  <script type="module" src="js/main.js?v=6"></script>
 </body>
 </html>

@@ -113,11 +113,21 @@ html, body {
   color: #cfe1ff;
 }
 
-#galaxy-slider {
+#galaxy-slider, #universe-slider {
   width: 100%;
   accent-color: #5b8cff;
   height: 26px;
 }
+
+#epoch-display {
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #9fb6e0;
+  margin: -2px 0 6px;
+}
+
+#epoch-display b { color: #ffd97a; }
 
 #time-buttons {
   display: flex;
