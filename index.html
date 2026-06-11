@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>太陽系シミュレーター 3D</title>
-  <link rel="stylesheet" href="css/style.css">
+  <!-- ?v= はキャッシュ対策のバージョン番号。デプロイのたびに上げる -->
+  <link rel="stylesheet" href="css/style.css?v=3">
   <script type="importmap">
   {
     "imports": {
@@ -17,9 +18,13 @@
 <body>
   <canvas id="view"></canvas>
 
-  <!-- ヘッダー -->
+  <!-- ヘッダー: タイトルとモード切替 -->
   <div id="header">
-    <h1>🪐 太陽系シミュレーター</h1>
+    <h1>🪐 宇宙シミュレーター</h1>
+    <div id="mode-tabs">
+      <button id="tab-solar" class="tab active">太陽系</button>
+      <button id="tab-galaxy" class="tab">銀河系</button>
+    </div>
   </div>
 
   <!-- イベント通知 -->
@@ -70,6 +75,7 @@
   <!-- 時間コントロール -->
   <div id="time-bar">
     <div id="time-display">現在</div>
+    <input type="range" id="galaxy-slider" class="hidden" min="-3000" max="3000" step="5" value="0">
     <div id="time-buttons">
       <button id="play-btn" class="playing">⏸ 停止</button>
       <select id="speed-select">
@@ -80,10 +86,19 @@
         <option value="1">1年/秒</option>
         <option value="5">5年/秒</option>
       </select>
+      <select id="galaxy-speed-select" class="hidden">
+        <option value="0.1">×0.1</option>
+        <option value="0.5">×0.5</option>
+        <option value="1" selected>×1</option>
+        <option value="2">×2</option>
+        <option value="5">×5</option>
+      </select>
+      <button id="clear-trails-btn">🧹 軌跡を消す</button>
       <button id="reset-btn">↺ リセット</button>
+      <button id="now-btn" class="hidden">⏺ 現在へ</button>
     </div>
   </div>
 
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

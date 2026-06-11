@@ -11,6 +11,8 @@ const G = 4 * Math.PI * Math.PI;      // AU³ / (年² · 太陽質量)
 const AU_KM = 1.496e8;                // 1 AU は何 km か
 export const EARTH_MASS = 3.003e-6;   // 地球質量(太陽質量単位)
 
+const _tmpVec = new THREE.Vector3();  // 使い回し用(毎ステップの割り当てを避ける)
+
 const DT_BASE = 2e-3;                 // 基本の刻み幅(年)
 const ETA = 8e-3;                     // 適応刻み係数: dt = ETA / √aMax
 const MAX_STEPS = 3000;               // 1フレームあたりの最大サブステップ数
@@ -236,6 +238,11 @@ export class SolarSystem {
       // 吸収判定は毎サブステップ行う。最接近時は数千km/sで通過するため、
       // フレームごとの判定ではすり抜けてしまう
       this._checkAbsorption();
+      // 軌跡もサブステップごとに記録する。フレームごとだと高速再生時に
+      // 楕円がカクカクの折れ線になってしまう
+      for (const b of this.bodies) {
+        if (b.alive) this._pushTrail(b, _tmpVec.copy(b.pos).multiplyScalar(POS_SCALE));
+      }
     }
     this.time += dtYears - Math.max(remaining, 0);
     this._checkEscape();
@@ -310,12 +317,16 @@ export class SolarSystem {
     b.trailGeo.setDrawRange(0, 0);
   }
 
+  clearAllTrails() {
+    for (const b of this.bodies) this.clearTrail(b.key);
+  }
+
   _pushTrail(b, p) {
     // 点を打つ間隔は太陽からの距離に比例(=ほぼ等角度サンプリング)。
     // 太陽の近くを高速で回り込む鋭いカーブも滑らかに描ける
     const step = b.key === 'sun'
       ? 0.1
-      : Math.max(0.02, p.distanceTo(this.bodies[0].mesh.position) * 0.025);
+      : Math.max(0.02, b.pos.distanceTo(this.bodies[0].pos) * POS_SCALE * 0.025);
     if (b.lastTrail && b.lastTrail.distanceTo(p) < step) return;
     if (b.trailCount === TRAIL_MAX) {
       // 満杯になったら前半分を捨てる
@@ -338,7 +349,6 @@ export class SolarSystem {
       b.mesh.scale.setScalar(Math.max(this.displayRadius(b), 1e-6));
       b.marker.position.copy(p);
       b.label.position.copy(p);
-      this._pushTrail(b, p);
     }
     const sun = this.bodies[0];
     this.glow.position.copy(sun.mesh.position);

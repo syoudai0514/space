@@ -1,24 +1,45 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=3';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=3';
 
-// ---------- レンダラー / シーン ----------
+// ---------- レンダラー ----------
 const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
+// ---------- 太陽系シーン ----------
 const solar = new SolarSystem();
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.005, 6000);
-camera.position.set(0, 30, 65);
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.minDistance = 0.02;
-controls.maxDistance = 1800;
+const solarCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.005, 6000);
+solarCam.position.set(0, 30, 65);
+const solarControls = new OrbitControls(solarCam, canvas);
+solarControls.enableDamping = true;
+solarControls.minDistance = 0.02;
+solarControls.maxDistance = 1800;
+
+// ---------- 銀河シーン ----------
+const galaxyScene = new THREE.Scene();
+const galaxy = createGalaxy();
+galaxyScene.add(galaxy.group);
+galaxyScene.add(createBackgroundStars());
+
+const galaxyCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 3000);
+galaxyCam.position.set(0, 17, 26);
+const galaxyControls = new OrbitControls(galaxyCam, canvas);
+galaxyControls.enableDamping = true;
+galaxyControls.minDistance = 4;
+galaxyControls.maxDistance = 120;
+galaxyControls.enabled = false;
 
 // ---------- 状態 ----------
-let playing = true;
+let mode = 'solar';          // 'solar' | 'galaxy'
+let solarPlaying = true;
+let galaxyPlaying = false;
+let galaxyTime = 0;          // 百万年
+const GALAXY_RANGE = 3000;
+const GALAXY_RATE = 80;      // 再生速度 80百万年/秒
 let followKey = null;        // 追従中の天体キー
 const BASE_DATE = new Date(); // 「現在」の基準
 
@@ -27,6 +48,11 @@ const $ = (id) => document.getElementById(id);
 const timeDisplay = $('time-display');
 const playBtn = $('play-btn');
 const speedSelect = $('speed-select');
+const galaxySpeedSelect = $('galaxy-speed-select');
+const galaxySlider = $('galaxy-slider');
+const nowBtn = $('now-btn');
+const resetBtn = $('reset-btn');
+const clearTrailsBtn = $('clear-trails-btn');
 const planetPanel = $('planet-panel');
 const panelToggle = $('panel-toggle');
 const bodySelect = $('body-select');
@@ -64,27 +90,92 @@ function toast(msg) {
 solar.onEvent = toast;
 
 // ---------- 時間表示 ----------
-function formatTime(years) {
+function formatSolarTime(years) {
   const d = new Date(BASE_DATE.getTime() + years * 365.25 * 24 * 3600 * 1000);
   const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
   return `${dateStr} (+${years.toFixed(2)}年)`;
 }
-timeDisplay.textContent = formatTime(0);
+
+function formatGalaxyTime(myr) {
+  if (Math.abs(myr) < 1) return '現在の銀河系';
+  const abs = Math.abs(myr);
+  const label = abs >= 100
+    ? `${(abs / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}億年`
+    : `${Math.round(abs)}百万年`;
+  return myr > 0 ? `${label}後の銀河系` : `${label}前の銀河系`;
+}
+
+function updateTimeDisplay() {
+  timeDisplay.textContent = mode === 'solar'
+    ? formatSolarTime(solar.time)
+    : formatGalaxyTime(galaxyTime);
+}
+
+// ---------- モード切替 ----------
+function isPlaying() {
+  return mode === 'solar' ? solarPlaying : galaxyPlaying;
+}
+
+function updatePlayBtn() {
+  const p = isPlaying();
+  playBtn.textContent = p ? '⏸ 停止' : '▶ 再生';
+  playBtn.classList.toggle('playing', p);
+}
+
+function setMode(next) {
+  mode = next;
+  const isSolar = mode === 'solar';
+  $('tab-galaxy').classList.toggle('active', !isSolar);
+  $('tab-solar').classList.toggle('active', isSolar);
+  solarControls.enabled = isSolar;
+  galaxyControls.enabled = !isSolar;
+  // UIの出し分け
+  panelToggle.classList.toggle('hidden', !isSolar);
+  speedSelect.classList.toggle('hidden', !isSolar);
+  resetBtn.classList.toggle('hidden', !isSolar);
+  clearTrailsBtn.classList.toggle('hidden', !isSolar);
+  galaxySlider.classList.toggle('hidden', isSolar);
+  galaxySpeedSelect.classList.toggle('hidden', isSolar);
+  nowBtn.classList.toggle('hidden', isSolar);
+  if (!isSolar) planetPanel.classList.add('hidden');
+  updatePlayBtn();
+  updateTimeDisplay();
+}
+
+$('tab-galaxy').addEventListener('click', () => setMode('galaxy'));
+$('tab-solar').addEventListener('click', () => setMode('solar'));
 
 // ---------- 再生コントロール ----------
 playBtn.addEventListener('click', () => {
-  playing = !playing;
-  playBtn.textContent = playing ? '⏸ 停止' : '▶ 再生';
-  playBtn.classList.toggle('playing', playing);
+  if (mode === 'solar') solarPlaying = !solarPlaying;
+  else galaxyPlaying = !galaxyPlaying;
+  updatePlayBtn();
 });
 
-$('reset-btn').addEventListener('click', () => {
+resetBtn.addEventListener('click', () => {
   solar.reset();
   followKey = null;
   updateFollowBtn();
-  timeDisplay.textContent = formatTime(0);
+  updateTimeDisplay();
   refreshPanel();
   toast('↺ 最初の状態に戻しました');
+});
+
+clearTrailsBtn.addEventListener('click', () => {
+  solar.clearAllTrails();
+});
+
+galaxySlider.addEventListener('input', () => {
+  galaxyTime = parseFloat(galaxySlider.value);
+  galaxy.setTime(galaxyTime);
+  updateTimeDisplay();
+});
+
+nowBtn.addEventListener('click', () => {
+  galaxyTime = 0;
+  galaxySlider.value = 0;
+  galaxy.setTime(0);
+  updateTimeDisplay();
 });
 
 // ---------- 天体パネル ----------
@@ -187,13 +278,13 @@ followBtn.addEventListener('click', () => {
     if (b.alive) {
       // カメラを天体の近くへ寄せる
       const target = b.pos.clone().multiplyScalar(POS_SCALE);
-      const dir = camera.position.clone().sub(controls.target).normalize();
+      const dir = solarCam.position.clone().sub(solarControls.target).normalize();
       const dist = Math.min(
         Math.max(solar.displayRadius(b) * 14, 0.15),
-        camera.position.distanceTo(target)
+        solarCam.position.distanceTo(target)
       );
-      controls.target.copy(target);
-      camera.position.copy(target).addScaledVector(dir, dist);
+      solarControls.target.copy(target);
+      solarCam.position.copy(target).addScaledVector(dir, dist);
     }
   }
   updateFollowBtn();
@@ -204,22 +295,22 @@ function applyFollow() {
   const b = solar.getBody(followKey);
   if (!b.alive) { followKey = null; updateFollowBtn(); return; }
   const target = b.pos.clone().multiplyScalar(POS_SCALE);
-  const delta = target.clone().sub(controls.target);
-  controls.target.copy(target);
-  camera.position.add(delta);
+  const delta = target.clone().sub(solarControls.target);
+  solarControls.target.copy(target);
+  solarCam.position.add(delta);
 }
 
-// ---------- タップ選択 & ドラッグ移動 ----------
+// ---------- タップ選択 & ドラッグ移動 (太陽系モードのみ) ----------
 const raycaster = new THREE.Raycaster();
 const pointerNdc = new THREE.Vector2();
 let pointerState = null; // { id, key, downX, downY, dragging, plane }
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (pointerState) return;
-  const hit = solar.pickBody(camera, e.clientX, e.clientY, innerWidth, innerHeight);
+  if (mode !== 'solar' || pointerState) return;
+  const hit = solar.pickBody(solarCam, e.clientX, e.clientY, innerWidth, innerHeight);
   if (!hit) return;
   pointerState = { id: e.pointerId, key: hit.key, downX: e.clientX, downY: e.clientY, dragging: false, plane: null };
-  controls.enabled = false; // このジェスチャー中は視点操作を止める
+  solarControls.enabled = false; // このジェスチャー中は視点操作を止める
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -232,7 +323,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (pointerState.dragging) {
     pointerNdc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-    raycaster.setFromCamera(pointerNdc, camera);
+    raycaster.setFromCamera(pointerNdc, solarCam);
     const out = new THREE.Vector3();
     if (raycaster.ray.intersectPlane(pointerState.plane, out)) {
       solar.setDisplayPosition(pointerState.key, out);
@@ -252,7 +343,7 @@ function endPointer(e, cancelled) {
     planetPanel.classList.remove('hidden');
   }
   pointerState = null;
-  controls.enabled = true;
+  solarControls.enabled = mode === 'solar';
 }
 canvas.addEventListener('pointerup', (e) => endPointer(e, false));
 canvas.addEventListener('pointercancel', (e) => endPointer(e, true));
@@ -264,29 +355,44 @@ let infoTick = 0;
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
-  const dragging = pointerState !== null && pointerState.dragging;
 
-  if (playing && !dragging) {
-    solar.advance(parseFloat(speedSelect.value) * dt);
-    timeDisplay.textContent = formatTime(solar.time);
-  }
+  if (mode === 'solar') {
+    const dragging = pointerState !== null && pointerState.dragging;
+    if (solarPlaying && !dragging) {
+      solar.advance(parseFloat(speedSelect.value) * dt);
+      updateTimeDisplay();
+    }
+    solar.syncVisuals();
+    applyFollow();
+    solarControls.update();
+    renderer.render(solar.scene, solarCam);
 
-  solar.syncVisuals();
-  applyFollow();
-  controls.update();
-  renderer.render(solar.scene, camera);
-
-  // パネルの数値を定期的に更新
-  if (!planetPanel.classList.contains('hidden') && ++infoTick % 15 === 0) {
-    refreshInfo();
+    // パネルの数値を定期的に更新
+    if (!planetPanel.classList.contains('hidden') && ++infoTick % 15 === 0) {
+      refreshInfo();
+    }
+  } else {
+    if (galaxyPlaying) {
+      galaxyTime += GALAXY_RATE * parseFloat(galaxySpeedSelect.value) * dt;
+      if (galaxyTime > GALAXY_RANGE) galaxyTime = -GALAXY_RANGE; // 端まで来たらループ
+      galaxySlider.value = galaxyTime;
+      galaxy.setTime(galaxyTime);
+      updateTimeDisplay();
+    }
+    galaxyControls.update();
+    renderer.render(galaxyScene, galaxyCam);
   }
 }
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
+  for (const cam of [solarCam, galaxyCam]) {
+    cam.aspect = window.innerWidth / window.innerHeight;
+    cam.updateProjectionMatrix();
+  }
 });
 
 refreshPanel();
+setMode('solar');
+updateTimeDisplay();
 animate();

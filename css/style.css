@@ -42,6 +42,28 @@ html, body {
   white-space: nowrap;
 }
 
+#mode-tabs {
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.tab {
+  padding: 8px 16px;
+  border: 1px solid rgba(130, 170, 255, 0.4);
+  border-radius: 18px;
+  background: rgba(10, 18, 38, 0.75);
+  color: #aac4ee;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: rgba(60, 110, 220, 0.85);
+  color: #fff;
+  border-color: rgba(160, 200, 255, 0.8);
+}
+
 /* ---------- イベント通知 ---------- */
 #toasts {
   position: fixed;
@@ -89,6 +111,12 @@ html, body {
   font-weight: 600;
   margin-bottom: 6px;
   color: #cfe1ff;
+}
+
+#galaxy-slider {
+  width: 100%;
+  accent-color: #5b8cff;
+  height: 26px;
 }
 
 #time-buttons {
@@ -236,4 +264,6 @@ html, body {
 
 @media (max-width: 480px) {
   #header h1 { font-size: 13px; }
+  .tab { padding: 7px 12px; font-size: 12px; }
+  #time-buttons button, #time-buttons select { padding: 7px 10px; font-size: 12px; }
 }
