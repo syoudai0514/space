@@ -42,27 +42,32 @@ html, body {
   white-space: nowrap;
 }
 
-#mode-tabs {
+/* ---------- イベント通知 ---------- */
+#toasts {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  pointer-events: auto;
+  z-index: 20;
+  pointer-events: none;
 }
 
-.tab {
+.toast {
   padding: 8px 16px;
-  border: 1px solid rgba(130, 170, 255, 0.4);
-  border-radius: 18px;
-  background: rgba(10, 18, 38, 0.75);
-  color: #aac4ee;
+  background: rgba(8, 14, 30, 0.92);
+  border: 1px solid rgba(255, 190, 100, 0.5);
+  border-radius: 12px;
+  color: #ffe3b8;
   font-size: 13px;
-  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.8s;
 }
 
-.tab.active {
-  background: rgba(60, 110, 220, 0.85);
-  color: #fff;
-  border-color: rgba(160, 200, 255, 0.8);
-}
+.toast.fade { opacity: 0; }
 
 /* ---------- 時間コントロール ---------- */
 #time-bar {
@@ -86,12 +91,6 @@ html, body {
   color: #cfe1ff;
 }
 
-#time-slider {
-  width: 100%;
-  accent-color: #5b8cff;
-  height: 26px;
-}
-
 #time-buttons {
   display: flex;
   justify-content: center;
@@ -111,6 +110,17 @@ html, body {
 
 #play-btn.playing {
   background: rgba(60, 140, 80, 0.9);
+}
+
+.action.active {
+  background: rgba(60, 140, 80, 0.85);
+  border-color: rgba(140, 230, 160, 0.6);
+  color: #e2ffe9;
+}
+
+.divider {
+  border-top: 1px solid rgba(130, 170, 255, 0.25);
+  margin: 12px 0;
 }
 
 /* ---------- 惑星パネル ---------- */
@@ -187,7 +197,7 @@ html, body {
   height: 26px;
 }
 
-#planet-info {
+#body-info {
   font-size: 12px;
   line-height: 1.7;
   color: #9fb6e0;
@@ -226,5 +236,4 @@ html, body {
 
 @media (max-width: 480px) {
   #header h1 { font-size: 13px; }
-  .tab { padding: 7px 12px; font-size: 12px; }
 }

@@ -1,262 +1,292 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js';
-import { SolarSystem } from './solarsystem.js';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js';
 
-// ---------- レンダラー ----------
+// ---------- レンダラー / シーン ----------
 const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// ---------- 銀河シーン ----------
-const galaxyScene = new THREE.Scene();
-const galaxy = createGalaxy();
-galaxyScene.add(galaxy.group);
-galaxyScene.add(createBackgroundStars());
-
-const galaxyCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 3000);
-galaxyCam.position.set(0, 17, 26);
-const galaxyControls = new OrbitControls(galaxyCam, canvas);
-galaxyControls.enableDamping = true;
-galaxyControls.minDistance = 4;
-galaxyControls.maxDistance = 120;
-
-// ---------- 太陽系シーン ----------
 const solar = new SolarSystem();
-solar.scene.add(createBackgroundStars(1800, 500));
 
-const solarCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 3000);
-solarCam.position.set(0, 70, 120);
-const solarControls = new OrbitControls(solarCam, canvas);
-solarControls.enableDamping = true;
-solarControls.minDistance = 8;
-solarControls.maxDistance = 400;
-solarControls.enabled = false;
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.005, 6000);
+camera.position.set(0, 30, 65);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.minDistance = 0.02;
+controls.maxDistance = 1800;
 
 // ---------- 状態 ----------
-// 銀河: 時間は百万年単位 / 太陽系: 年単位
-const modes = {
-  galaxy: { t: 0, min: -3000, max: 3000, step: 5, rate: 80 },   // 再生速度 80百万年/秒
-  solar:  { t: 0, min: -100, max: 100, step: 0.1, rate: 2 },    // 再生速度 2年/秒
-};
-let mode = 'galaxy';
-let playing = false;
-
+let playing = true;
+let followKey = null;        // 追従中の天体キー
 const BASE_DATE = new Date(); // 「現在」の基準
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
-const timeSlider = $('time-slider');
 const timeDisplay = $('time-display');
 const playBtn = $('play-btn');
 const speedSelect = $('speed-select');
 const planetPanel = $('planet-panel');
 const panelToggle = $('panel-toggle');
-const planetSelect = $('planet-select');
-const planetInfo = $('planet-info');
+const bodySelect = $('body-select');
+const bodyInfo = $('body-info');
 const sizeSlider = $('size-slider');
 const massSlider = $('mass-slider');
+const distSlider = $('dist-slider');
+const distField = $('dist-field');
 const sizeValue = $('size-value');
 const massValue = $('mass-value');
+const distValue = $('dist-value');
+const exaggSlider = $('exagg-slider');
+const exaggValue = $('exagg-value');
+const followBtn = $('follow-btn');
 
-// 惑星セレクトを構築
-for (const p of solar.planets) {
+// 天体セレクトを構築
+for (const b of solar.bodies) {
   const opt = document.createElement('option');
-  opt.value = p.key;
-  opt.textContent = p.name;
-  planetSelect.appendChild(opt);
+  opt.value = b.key;
+  opt.textContent = b.name;
+  bodySelect.appendChild(opt);
 }
-planetSelect.value = 'earth';
+bodySelect.value = 'earth';
+
+// ---------- トースト通知 ----------
+const toasts = $('toasts');
+function toast(msg) {
+  const div = document.createElement('div');
+  div.className = 'toast';
+  div.textContent = msg;
+  toasts.appendChild(div);
+  setTimeout(() => div.classList.add('fade'), 3600);
+  setTimeout(() => div.remove(), 4400);
+}
+solar.onEvent = toast;
 
 // ---------- 時間表示 ----------
-function formatGalaxyTime(myr) {
-  if (Math.abs(myr) < 1) return '現在の銀河系';
-  const abs = Math.abs(myr);
-  const label = abs >= 100
-    ? `${(abs / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}億年`
-    : `${abs}百万年`;
-  return myr > 0 ? `${label}後の銀河系` : `${label}前の銀河系`;
-}
-
-function formatSolarTime(years) {
+function formatTime(years) {
   const d = new Date(BASE_DATE.getTime() + years * 365.25 * 24 * 3600 * 1000);
   const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
-  if (Math.abs(years) < 0.01) return `現在 (${dateStr})`;
-  const rel = years > 0 ? `+${years.toFixed(1)}年` : `${years.toFixed(1)}年`;
-  return `${dateStr} (${rel})`;
+  return `${dateStr} (+${years.toFixed(2)}年)`;
 }
+timeDisplay.textContent = formatTime(0);
 
-function applyTime() {
-  const m = modes[mode];
-  if (mode === 'galaxy') {
-    galaxy.setTime(m.t);
-    timeDisplay.textContent = formatGalaxyTime(m.t);
-  } else {
-    solar.setTime(m.t);
-    timeDisplay.textContent = formatSolarTime(m.t);
-  }
-}
-
-function syncSlider() {
-  const m = modes[mode];
-  timeSlider.min = m.min;
-  timeSlider.max = m.max;
-  timeSlider.step = m.step;
-  timeSlider.value = m.t;
-}
-
-// ---------- モード切替 ----------
-function setMode(next) {
-  mode = next;
-  const isSolar = mode === 'solar';
-  $('tab-galaxy').classList.toggle('active', !isSolar);
-  $('tab-solar').classList.toggle('active', isSolar);
-  galaxyControls.enabled = !isSolar;
-  solarControls.enabled = isSolar;
-  panelToggle.classList.toggle('hidden', !isSolar);
-  if (!isSolar) planetPanel.classList.add('hidden');
-  syncSlider();
-  applyTime();
-}
-
-$('tab-galaxy').addEventListener('click', () => setMode('galaxy'));
-$('tab-solar').addEventListener('click', () => setMode('solar'));
-
-// ---------- 時間コントロール ----------
-timeSlider.addEventListener('input', () => {
-  modes[mode].t = parseFloat(timeSlider.value);
-  applyTime();
-});
-
+// ---------- 再生コントロール ----------
 playBtn.addEventListener('click', () => {
   playing = !playing;
   playBtn.textContent = playing ? '⏸ 停止' : '▶ 再生';
   playBtn.classList.toggle('playing', playing);
 });
 
-$('now-btn').addEventListener('click', () => {
-  modes[mode].t = 0;
-  syncSlider();
-  applyTime();
+$('reset-btn').addEventListener('click', () => {
+  solar.reset();
+  followKey = null;
+  updateFollowBtn();
+  timeDisplay.textContent = formatTime(0);
+  refreshPanel();
+  toast('↺ 最初の状態に戻しました');
 });
 
-// ---------- 惑星パネル ----------
+// ---------- 天体パネル ----------
 panelToggle.addEventListener('click', () => planetPanel.classList.toggle('hidden'));
 $('panel-close').addEventListener('click', () => planetPanel.classList.add('hidden'));
 
-function formatMass(earthMass) {
-  if (earthMass >= 10000) return `地球の約${Math.round(earthMass / 1000) * 1000}倍`;
-  if (earthMass >= 10) return `地球の約${Math.round(earthMass)}倍`;
-  if (earthMass >= 0.95 && earthMass < 1.05) return '地球と同じ';
-  return `地球の約${earthMass.toPrecision(2)}倍`;
+function formatEarthMass(solarMass) {
+  const em = solarMass / EARTH_MASS;
+  if (em >= 10000) return `地球の約${Math.round(em / 1000) * 1000}倍`;
+  if (em >= 10) return `地球の約${Math.round(em)}倍`;
+  if (em >= 0.95 && em < 1.05) return '地球と同じ';
+  return `地球の約${em.toPrecision(2)}倍`;
+}
+
+function refreshInfo() {
+  const b = solar.getBody(bodySelect.value);
+  const sun = solar.bodies[0];
+  const lines = [`<b>${b.name}</b>`];
+  if (!b.alive) {
+    lines.push('🔥 太陽に飲み込まれました(リセットで復活)');
+  } else {
+    if (b.escaped) lines.push('🚀 太陽系のかなたへ…');
+    if (b.key !== 'sun') {
+      const r = b.pos.distanceTo(sun.pos);
+      const v = b.vel.clone().sub(sun.vel).length() * 4.74; // AU/年 → km/s
+      lines.push(`太陽からの距離: ${r.toFixed(2)} AU`);
+      lines.push(`速度: ${v.toFixed(1)} km/s`);
+    }
+    const radiusKm = b.radiusKm * b.sizeScale;
+    lines.push(`半径: ${Math.round(radiusKm).toLocaleString()} km (地球の${(radiusKm / 6371).toPrecision(3)}倍)`);
+    lines.push(b.key === 'sun'
+      ? `質量: 太陽の${solar.effMass(b).toPrecision(3)}倍`
+      : `質量: ${formatEarthMass(solar.effMass(b))}`);
+  }
+  bodyInfo.innerHTML = lines.join('<br>');
 }
 
 function refreshPanel() {
-  const p = solar.getPlanet(planetSelect.value);
-  sizeSlider.value = Math.log10(p.sizeScale);
-  massSlider.value = Math.log10(p.massScale);
-  sizeValue.textContent = `×${p.sizeScale.toFixed(2)}`;
-  massValue.textContent = `×${p.massScale.toFixed(2)}`;
-  const period = solar.periodOf(p);
-  const periodStr = period >= 1 ? `${period.toFixed(1)}年` : `${(period * 365.25).toFixed(0)}日`;
-  planetInfo.innerHTML = [
-    `<b>${p.name}</b>`,
-    `太陽からの距離: ${p.a.toFixed(2)} AU${p.a !== p.baseA ? ' (入れ替え中!)' : ''}`,
-    `公転周期: ${periodStr}`,
-    `半径: 地球の${(p.baseRadius * p.sizeScale).toPrecision(3)}倍`,
-    `質量: ${formatMass(p.baseMass * p.massScale)}`,
-  ].join('<br>');
+  const b = solar.getBody(bodySelect.value);
+  sizeSlider.value = Math.log10(b.sizeScale);
+  massSlider.value = Math.log10(b.massScale);
+  sizeValue.textContent = `×${b.sizeScale.toFixed(2)}`;
+  massValue.textContent = `×${b.massScale.toFixed(2)}`;
+  exaggValue.textContent = `×${Math.round(solar.exaggeration)}`;
+  exaggSlider.value = Math.log10(solar.exaggeration);
+  const isSun = b.key === 'sun';
+  distField.classList.toggle('hidden', isSun);
+  if (!isSun && b.alive) {
+    const r = b.pos.distanceTo(solar.bodies[0].pos);
+    distSlider.value = Math.log10(Math.max(r, 0.05));
+    distValue.textContent = `${r.toFixed(2)} AU`;
+  }
+  updateFollowBtn();
+  refreshInfo();
 }
 
-planetSelect.addEventListener('change', refreshPanel);
+bodySelect.addEventListener('change', refreshPanel);
 
 sizeSlider.addEventListener('input', () => {
   const scale = Math.pow(10, parseFloat(sizeSlider.value));
-  solar.setSizeScale(planetSelect.value, scale);
-  refreshPanel();
+  solar.setSizeScale(bodySelect.value, scale);
+  sizeValue.textContent = `×${scale.toFixed(2)}`;
+  refreshInfo();
 });
 
 massSlider.addEventListener('input', () => {
   const scale = Math.pow(10, parseFloat(massSlider.value));
-  solar.setMassScale(planetSelect.value, scale);
-  refreshPanel();
-  applyTime();
+  solar.setMassScale(bodySelect.value, scale);
+  massValue.textContent = `×${scale.toFixed(2)}`;
+  refreshInfo();
 });
 
-$('swap-btn').addEventListener('click', () => {
-  const swapped = solar.swapEarthJupiter();
-  $('swap-btn').textContent = swapped
-    ? '🔄 地球 ⇄ 木星 を元に戻す'
-    : '🔄 地球 ⇄ 木星 を入れ替え';
-  refreshPanel();
+distSlider.addEventListener('input', () => {
+  const au = Math.pow(10, parseFloat(distSlider.value));
+  solar.setDistanceAU(bodySelect.value, au);
+  distValue.textContent = `${au.toFixed(2)} AU`;
+  refreshInfo();
 });
 
-$('reset-planets-btn').addEventListener('click', () => {
-  solar.resetPlanets();
-  $('swap-btn').textContent = '🔄 地球 ⇄ 木星 を入れ替え';
-  refreshPanel();
+exaggSlider.addEventListener('input', () => {
+  const e = Math.pow(10, parseFloat(exaggSlider.value));
+  solar.setExaggeration(e);
+  exaggValue.textContent = `×${Math.round(e)}`;
 });
 
-refreshPanel();
+// ---------- 追従カメラ ----------
+function updateFollowBtn() {
+  const active = followKey !== null && followKey === bodySelect.value;
+  followBtn.textContent = active ? '🎯 追従中 (タップで解除)' : '🎯 この天体を追いかける';
+  followBtn.classList.toggle('active', active);
+}
 
-// ---------- タップで惑星を選択 ----------
+followBtn.addEventListener('click', () => {
+  const key = bodySelect.value;
+  if (followKey === key) {
+    followKey = null;
+  } else {
+    followKey = key;
+    const b = solar.getBody(key);
+    if (b.alive) {
+      // カメラを天体の近くへ寄せる
+      const target = b.pos.clone().multiplyScalar(POS_SCALE);
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      const dist = Math.min(
+        Math.max(solar.displayRadius(b) * 14, 0.15),
+        camera.position.distanceTo(target)
+      );
+      controls.target.copy(target);
+      camera.position.copy(target).addScaledVector(dir, dist);
+    }
+  }
+  updateFollowBtn();
+});
+
+function applyFollow() {
+  if (!followKey) return;
+  const b = solar.getBody(followKey);
+  if (!b.alive) { followKey = null; updateFollowBtn(); return; }
+  const target = b.pos.clone().multiplyScalar(POS_SCALE);
+  const delta = target.clone().sub(controls.target);
+  controls.target.copy(target);
+  camera.position.add(delta);
+}
+
+// ---------- タップ選択 & ドラッグ移動 ----------
 const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
-let downPos = null;
+const pointerNdc = new THREE.Vector2();
+let pointerState = null; // { id, key, downX, downY, dragging, plane }
 
-canvas.addEventListener('pointerdown', (e) => { downPos = [e.clientX, e.clientY]; });
-canvas.addEventListener('pointerup', (e) => {
-  if (mode !== 'solar' || !downPos) return;
-  const moved = Math.hypot(e.clientX - downPos[0], e.clientY - downPos[1]);
-  downPos = null;
-  if (moved > 8) return; // ドラッグは無視
-  pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-  raycaster.setFromCamera(pointer, solarCam);
-  const hits = raycaster.intersectObjects(solar.meshes, false);
-  if (hits.length === 0) return;
-  const planet = solar.planets.find((p) => p.mesh === hits[0].object);
-  if (planet) {
-    planetSelect.value = planet.key;
-    refreshPanel();
-    planetPanel.classList.remove('hidden');
+canvas.addEventListener('pointerdown', (e) => {
+  if (pointerState) return;
+  const hit = solar.pickBody(camera, e.clientX, e.clientY, innerWidth, innerHeight);
+  if (!hit) return;
+  pointerState = { id: e.pointerId, key: hit.key, downX: e.clientX, downY: e.clientY, dragging: false, plane: null };
+  controls.enabled = false; // このジェスチャー中は視点操作を止める
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointerState || e.pointerId !== pointerState.id) return;
+  const moved = Math.hypot(e.clientX - pointerState.downX, e.clientY - pointerState.downY);
+  if (!pointerState.dragging && moved > 8) {
+    pointerState.dragging = true; // ドラッグ開始(シミュレーションは一時停止)
+    const b = solar.getBody(pointerState.key);
+    pointerState.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -b.pos.y * POS_SCALE);
+  }
+  if (pointerState.dragging) {
+    pointerNdc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const out = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(pointerState.plane, out)) {
+      solar.setDisplayPosition(pointerState.key, out);
+    }
   }
 });
 
-// ---------- ループ ----------
+function endPointer(e, cancelled) {
+  if (!pointerState || e.pointerId !== pointerState.id) return;
+  if (pointerState.dragging) {
+    solar.clearTrail(pointerState.key); // 軌跡を引き直す
+    refreshPanel();
+  } else if (!cancelled) {
+    // タップ → 天体を選択してパネルを開く
+    bodySelect.value = pointerState.key;
+    refreshPanel();
+    planetPanel.classList.remove('hidden');
+  }
+  pointerState = null;
+  controls.enabled = true;
+}
+canvas.addEventListener('pointerup', (e) => endPointer(e, false));
+canvas.addEventListener('pointercancel', (e) => endPointer(e, true));
+
+// ---------- メインループ ----------
 const clock = new THREE.Clock();
+let infoTick = 0;
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
+  const dragging = pointerState !== null && pointerState.dragging;
 
-  if (playing) {
-    const m = modes[mode];
-    m.t += m.rate * parseFloat(speedSelect.value) * dt;
-    if (m.t > m.max) m.t = m.min; // 端まで来たらループ
-    if (m.t < m.min) m.t = m.max;
-    timeSlider.value = m.t;
-    applyTime();
+  if (playing && !dragging) {
+    solar.advance(parseFloat(speedSelect.value) * dt);
+    timeDisplay.textContent = formatTime(solar.time);
   }
 
-  if (mode === 'galaxy') {
-    galaxyControls.update();
-    renderer.render(galaxyScene, galaxyCam);
-  } else {
-    solarControls.update();
-    renderer.render(solar.scene, solarCam);
+  solar.syncVisuals();
+  applyFollow();
+  controls.update();
+  renderer.render(solar.scene, camera);
+
+  // パネルの数値を定期的に更新
+  if (!planetPanel.classList.contains('hidden') && ++infoTick % 15 === 0) {
+    refreshInfo();
   }
 }
 
 window.addEventListener('resize', () => {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
-  for (const cam of [galaxyCam, solarCam]) {
-    cam.aspect = w / h;
-    cam.updateProjectionMatrix();
-  }
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
 });
 
-setMode('galaxy');
+refreshPanel();
 animate();
