@@ -142,6 +142,23 @@ export function createUniverse() {
     put(dir.x * r, dir.y * r, dir.z * r);
   }
 
+  // 「私たちの天の川銀河」は実在する銀河インスタンスから渦巻銀河を1つ選ぶ
+  // (マーカーが本物の銀河の位置に正確に張り付く)
+  let mwIndex = -1;
+  for (let n = 0; n < total; n++) {
+    const d = Math.hypot(pos[n * 3], pos[n * 3 + 1], pos[n * 3 + 2]);
+    if (tex[n] <= 1 && d > 6 && d < 16) {
+      mwIndex = n;
+      if (size[n] > 1.2) break; // 大きめの渦巻が見つかったら確定
+    }
+  }
+  if (mwIndex < 0) mwIndex = 0;
+  size[mwIndex] = Math.max(size[mwIndex], 1.5);  // 見つけやすい大きさに
+  birth[mwIndex] = Math.min(birth[mwIndex], 0.5); // 天の川銀河は早生まれ
+  const mwPos = new THREE.Vector3(pos[mwIndex * 3], pos[mwIndex * 3 + 1], pos[mwIndex * 3 + 2]);
+  const mwBirth = birth[mwIndex];
+  const mwSize = size[mwIndex];
+
   // インスタンス描画: 1枚の四角形ポリゴンを銀河の数だけ使い回す
   const base = new THREE.PlaneGeometry(1, 1);
   const geo = new THREE.InstancedBufferGeometry();
@@ -195,10 +212,18 @@ export function createUniverse() {
   flash.visible = false;
   scene.add(flash);
 
-  // 私たちの天の川銀河の目印
-  const mwPos = new THREE.Vector3(7, 1.5, 4);
+  // 私たちの天の川銀河の目印(テキスト + 3D空間に固定されたリング)
   const mwLabel = makeLabel('私たちの天の川銀河');
   scene.add(mwLabel);
+  const mwRing = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeRingTexture(),
+    color: 0xffd97a,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  }));
+  mwRing.scale.setScalar(mwSize * 2.6); // 銀河を囲む大きさ(ワールド座標)
+  scene.add(mwRing);
 
   const smooth = (x, a, b) => THREE.MathUtils.smoothstep(x, a, b);
 
@@ -206,8 +231,14 @@ export function createUniverse() {
     const a = scaleFactor(tGyr);
     uniforms.uTime.value = tGyr;
     uniforms.uA.value = a;
-    mwLabel.visible = tGyr > 0.5;
+    // 天の川銀河マーカー: 選んだ銀河の位置に正確に追従(膨張と一緒に動く)
+    const mwShow = smooth(tGyr, mwBirth + 0.15, mwBirth + 0.6);
+    mwLabel.visible = mwShow > 0.01;
+    mwRing.visible = mwShow > 0.01;
+    mwLabel.material.opacity = mwShow;
+    mwRing.material.opacity = mwShow * 0.75;
     mwLabel.position.copy(mwPos).multiplyScalar(a);
+    mwRing.position.copy(mwPos).multiplyScalar(a);
 
     // ---------- 誕生の瞬間 (〜30秒後): 無 → 一点の光 → 閃光が膨張 ----------
     if (tGyr < FLASH_END) {
@@ -439,6 +470,19 @@ function makeLabel(text) {
   sprite.scale.set(0.28, 0.035, 1);
   sprite.center.set(0.5, -0.35);
   return sprite;
+}
+
+function makeRingTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 5;
+  ctx.setLineDash([22, 14]); // 破線リングでマーカーらしく
+  ctx.beginPath();
+  ctx.arc(128, 128, 110, 0, Math.PI * 2);
+  ctx.stroke();
+  return new THREE.CanvasTexture(c);
 }
 
 function makeGlowTexture() {

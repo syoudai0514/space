@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js?v=8';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=8';
-import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=8';
-import { createAtoms, atomEpochInfo, formatAtomTime, ATOM_LOG_MIN, ATOM_LOG_MAX } from './atoms.js?v=8';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=9';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=9';
+import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=9';
+import { createAtoms, atomEpochInfo, formatAtomTime, ATOM_LOG_MIN, ATOM_LOG_MAX } from './atoms.js?v=9';
 
 // ---------- レンダラー ----------
 const canvas = document.getElementById('view');
