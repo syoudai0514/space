@@ -3,11 +3,15 @@
 // 膨張は実際の宇宙論(ΛCDMモデル: 物質+ダークエネルギー)のスケール因子
 //   a(t) = (Ωm/ΩΛ)^(1/3) · sinh^(2/3)( (3/2)·√ΩΛ·H0·t )
 // を使用。現在(t=138億年)で a=1 になるよう正規化している。
+//
+// 銀河は1つ1つがテクスチャ付きのビルボード(渦巻・楕円・不規則)なので、
+// ズームすると渦巻の腕まで見える。
 
 import * as THREE from 'three';
 
 export const NOW_GYR = 13.8;   // 現在の宇宙年齢(十億年)
 export const END_GYR = 23.8;   // シミュレーション終端(=100億年後)
+export const FLASH_END = 1e-15; // 誕生の閃光演出の終わり(≈30秒後)
 
 const OMEGA_M = 0.31;          // 物質の割合
 const OMEGA_L = 0.69;          // ダークエネルギーの割合
@@ -32,16 +36,18 @@ export function scaleFactor(tGyr) {
 const VERTEX_SHADER = /* glsl */`
   uniform float uTime;   // 宇宙年齢(十億年)
   uniform float uA;      // スケール因子
+  attribute vec3 iPos;   // 共動座標
   attribute float aBirth;
   attribute float aSize;
   attribute float aTint;
+  attribute float aTex;  // テクスチャ番号(0〜3)
+  attribute float aRot;  // 見た目の回転
+  attribute float aFlat; // 傾き(円盤を斜めから見た潰れ)
+  varying vec2 vUv;
   varying vec3 vColor;
   varying float vAlpha;
 
   void main() {
-    // 共動座標 × スケール因子 = 実際の位置(宇宙膨張)
-    vec3 p = position * uA;
-
     // 誕生時刻を過ぎたらゆっくり点灯
     vAlpha = smoothstep(aBirth, aBirth + 0.4, uTime);
 
@@ -55,21 +61,30 @@ const VERTEX_SHADER = /* glsl */`
     float dim = 1.0 - 0.45 * smoothstep(15.0, 23.8, uTime);
     vColor = c * (0.75 + 0.25 * aTint) * dim;
 
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = aSize * (160.0 / -mv.z);
+    // ビルボード: 銀河自体は膨張しない(膨張するのは銀河の「間」の空間)
+    vec2 corner = position.xy;
+    corner.y *= aFlat;
+    float cr = cos(aRot), sr = sin(aRot);
+    corner = mat2(cr, sr, -sr, cr) * corner;
+    vec4 mv = modelViewMatrix * vec4(iPos * uA, 1.0);
+    mv.xy += corner * aSize;
+
+    // 2x2テクスチャアトラスから自分の絵を選ぶ
+    vUv = (uv + vec2(mod(aTex, 2.0), floor(aTex / 2.0))) * 0.5;
     gl_Position = projectionMatrix * mv;
   }
 `;
 
 const FRAGMENT_SHADER = /* glsl */`
+  uniform sampler2D uMap;
+  varying vec2 vUv;
   varying vec3 vColor;
   varying float vAlpha;
   void main() {
-    vec2 c = gl_PointCoord - 0.5;
-    float d = length(c);
-    if (d > 0.5) discard;
-    float a = smoothstep(0.5, 0.08, d);
-    gl_FragColor = vec4(vColor, a * vAlpha * 0.95);
+    vec4 t = texture2D(uMap, vUv);
+    float a = t.a * vAlpha;
+    if (a < 0.004) discard;
+    gl_FragColor = vec4(vColor * t.rgb, a);
   }
 `;
 
@@ -89,14 +104,22 @@ export function createUniverse() {
   const birth = new Float32Array(total);
   const size = new Float32Array(total);
   const tint = new Float32Array(total);
+  const tex = new Float32Array(total);
+  const rot = new Float32Array(total);
+  const flat = new Float32Array(total);
 
   let i = 0;
   const put = (x, y, z) => {
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
     // 誕生時刻: ほとんどが2〜15億年(最初の銀河の時代)
     birth[i] = Math.min(0.2 + Math.abs(gaussian()) * 0.55, 3.0);
-    size[i] = 1.1 + Math.random() * 1.8 + Math.pow(Math.random(), 6) * 4.0;
+    size[i] = 0.5 + Math.random() * 0.8 + Math.pow(Math.random(), 6) * 2.2;
     tint[i] = Math.random();
+    const r = Math.random();
+    tex[i] = r < 0.4 ? 0 : r < 0.7 ? 1 : r < 0.88 ? 2 : 3; // 渦巻多め
+    rot[i] = Math.random() * Math.PI * 2;
+    // 楕円銀河はあまり潰さない、円盤銀河は斜めから見える
+    flat[i] = tex[i] === 2 ? 0.75 + Math.random() * 0.25 : 0.3 + Math.random() * 0.7;
     i++;
   };
 
@@ -119,25 +142,40 @@ export function createUniverse() {
     put(dir.x * r, dir.y * r, dir.z * r);
   }
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('aBirth', new THREE.BufferAttribute(birth, 1));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
-  geo.setAttribute('aTint', new THREE.BufferAttribute(tint, 1));
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), RADIUS * 2.5);
+  // インスタンス描画: 1枚の四角形ポリゴンを銀河の数だけ使い回す
+  const base = new THREE.PlaneGeometry(1, 1);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = base.index;
+  geo.setAttribute('position', base.getAttribute('position'));
+  geo.setAttribute('uv', base.getAttribute('uv'));
+  geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(pos, 3));
+  geo.setAttribute('aBirth', new THREE.InstancedBufferAttribute(birth, 1));
+  geo.setAttribute('aSize', new THREE.InstancedBufferAttribute(size, 1));
+  geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 1));
+  geo.setAttribute('aTex', new THREE.InstancedBufferAttribute(tex, 1));
+  geo.setAttribute('aRot', new THREE.InstancedBufferAttribute(rot, 1));
+  geo.setAttribute('aFlat', new THREE.InstancedBufferAttribute(flat, 1));
+  geo.instanceCount = total;
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), RADIUS * 3);
 
-  const uniforms = { uTime: { value: 0 }, uA: { value: 1 } };
-  const points = new THREE.Points(geo, new THREE.ShaderMaterial({
+  const uniforms = {
+    uTime: { value: 0 },
+    uA: { value: 1 },
+    uMap: { value: makeGalaxyAtlas() },
+  };
+  const galaxies = new THREE.Mesh(geo, new THREE.ShaderMaterial({
     uniforms,
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     transparent: true,
     depthWrite: false,
+    side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
   }));
-  scene.add(points);
+  galaxies.frustumCulled = false;
+  scene.add(galaxies);
 
-  // ビッグバン〜プラズマ時代の灼熱の光(晴れ上がりで消える)
+  // 火の玉宇宙の光球(晴れ上がりで消える)
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
     map: makeGlowTexture(),
     transparent: true,
@@ -146,39 +184,77 @@ export function createUniverse() {
   }));
   scene.add(glow);
 
+  // ビッグバンの閃光(誕生の瞬間だけ画面いっぱいに広がる)
+  const flash = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeGlowTexture(),
+    color: 0xffffff,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }));
+  flash.visible = false;
+  scene.add(flash);
+
   // 私たちの天の川銀河の目印
   const mwPos = new THREE.Vector3(7, 1.5, 4);
   const mwLabel = makeLabel('私たちの天の川銀河');
   scene.add(mwLabel);
 
+  const smooth = (x, a, b) => THREE.MathUtils.smoothstep(x, a, b);
+
   function setTime(tGyr) {
     const a = scaleFactor(tGyr);
     uniforms.uTime.value = tGyr;
     uniforms.uA.value = a;
+    mwLabel.visible = tGyr > 0.5;
+    mwLabel.position.copy(mwPos).multiplyScalar(a);
 
-    // --- 火の玉宇宙の見た目 ---
-    // 晴れ上がり(38万年)まで: 白熱 → オレンジ。その後すみやかに暗転
+    // ---------- 誕生の瞬間 (〜30秒後): 無 → 一点の光 → 閃光が膨張 ----------
+    if (tGyr < FLASH_END) {
+      if (tGyr <= 0) {
+        // 「無」: なにもない真っ暗
+        scene.background.setRGB(0, 0, 0);
+        glow.visible = false;
+        flash.visible = false;
+        return;
+      }
+      const p = THREE.MathUtils.clamp((Math.log10(tGyr) + 19) / 4, 0, 1);
+      // 一点の光が生まれて育つ
+      glow.visible = true;
+      glow.material.color.setRGB(1, 1, 1);
+      glow.material.opacity = smooth(p, 0.0, 0.12);
+      glow.scale.setScalar(THREE.MathUtils.lerp(0.12, 6, smooth(p, 0.1, 1)));
+      // 閃光の波が画面を覆って広がっていく
+      const wave = smooth(p, 0.25, 0.6) * (1 - smooth(p, 0.75, 1));
+      flash.visible = wave > 0.001;
+      flash.material.opacity = wave;
+      flash.scale.setScalar(2 + Math.pow(p, 2) * 320);
+      // 背景: 真っ暗 → 一瞬白く灼ける → 火の玉宇宙の色へ(p=1で下の処理と連続)
+      const wPeak = smooth(p, 0.35, 0.7) * (1 - smooth(p, 0.75, 1));
+      const settle = smooth(p, 0.75, 1);
+      scene.background.setRGB(0.55, 0.53, 0.5).multiplyScalar(settle)
+        .lerp(new THREE.Color(1, 1, 1), wPeak);
+      return;
+    }
+
+    // ---------- 火の玉宇宙 → 晴れ上がり → それ以降 ----------
     const logT = Math.log10(Math.max(tGyr, 1e-15));
-    const heat = 1 - THREE.MathUtils.smoothstep(logT, -15, Math.log10(T_RECOMB)); // 1=超高温
-    const clear = THREE.MathUtils.smoothstep(logT, Math.log10(T_RECOMB), Math.log10(T_RECOMB * 30)); // 晴れ上がり進行
+    const heat = 1 - smooth(logT, -15, Math.log10(T_RECOMB));            // 1=超高温
+    const clear = smooth(logT, Math.log10(T_RECOMB), Math.log10(T_RECOMB * 30)); // 晴れ上がり進行
 
     const hot = new THREE.Color(1.0, 0.97, 0.9);   // 白熱
     const warm = new THREE.Color(1.0, 0.45, 0.12); // 晴れ上がり直前のオレンジ
     const fireball = hot.clone().lerp(warm, 1 - heat);
 
     // 背景色: プラズマ時代は宇宙全体が光っている
-    const bg = fireball.clone().multiplyScalar(0.55 * (1 - clear));
-    scene.background.copy(bg);
+    scene.background.copy(fireball).multiplyScalar(0.55 * (1 - clear));
 
-    // 中心の光球: 膨張しながら冷えて、晴れ上がりで消える
+    // 光球: 膨張しながら冷えて、晴れ上がりで消える
+    flash.visible = false;
     glow.material.color.copy(fireball);
     glow.material.opacity = 1 - clear;
     glow.scale.setScalar(Math.max(a * RADIUS * 2.6, 6));
     glow.visible = clear < 0.999;
-
-    // 天の川銀河ラベル(銀河が生まれてから表示)
-    mwLabel.visible = tGyr > 0.5;
-    mwLabel.position.copy(mwPos).multiplyScalar(a);
   }
 
   setTime(0);
@@ -188,9 +264,13 @@ export function createUniverse() {
 // ---------- 時代の解説 ----------
 
 export function epochInfo(tGyr) {
+  if (tGyr <= 0) return {
+    title: '🕳 宇宙誕生前',
+    desc: '時間も空間もまだ存在しない。▶ 再生 でビッグバン!',
+  };
   if (tGyr < 5.7e-15) return {
-    title: '💥 ビッグバン',
-    desc: '宇宙のはじまり。超高温・超高密度の素粒子のスープが、膨張しながら急速に冷えていく',
+    title: '💥 ビッグバン!!',
+    desc: '宇宙のはじまり。超高温・超高密度の一点から、時間と空間そのものが膨張を始める',
   };
   if (tGyr < T_RECOMB) return {
     title: '🔥 火の玉宇宙',
@@ -210,7 +290,7 @@ export function epochInfo(tGyr) {
   };
   if (tGyr < 9.0) return {
     title: '🌌 銀河の時代',
-    desc: '銀河どうしが衝突・合体しながら大きく成長していく。宇宙でもっとも星の誕生が盛んな時代',
+    desc: '銀河どうしが衝突・合体しながら大きく成長していく。宇宙でもっとも星の誕生が盛んな時代(ズームで銀河に近づける)',
   };
   if (tGyr < 9.5) return {
     title: '☀️ 太陽系の誕生',
@@ -239,6 +319,8 @@ export function epochInfo(tGyr) {
 }
 
 export function formatUniverseTime(tGyr) {
+  if (tGyr <= 0) return 'まだ時間も空間もない';
+  if (tGyr < 1e-16) return 'ビッグバンの瞬間!';
   const yr = tGyr * 1e9;
   let age;
   if (yr < 1 / 5256) { // 100分未満
@@ -261,6 +343,77 @@ export function formatUniverseTime(tGyr) {
   else if (diffOku > 0) rel = diffOku < 10 ? `${diffOku.toFixed(1)}億年前` : `${diffOku.toFixed(0)}億年前`;
   else rel = -diffOku < 10 ? `${(-diffOku).toFixed(1)}億年後` : `${(-diffOku).toFixed(0)}億年後`;
   return `宇宙誕生から${age} (${rel})`;
+}
+
+// ---------- 銀河のテクスチャ(2x2アトラス: 渦巻×2・楕円・不規則) ----------
+
+function makeGalaxyAtlas() {
+  const SIZE = 1024;
+  const TILE = SIZE / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = SIZE;
+  const ctx = c.getContext('2d');
+
+  drawSpiral(ctx, TILE * 0.5, TILE * 0.5, TILE * 0.46, 2);   // 左上: 2本腕の渦巻
+  drawSpiral(ctx, TILE * 1.5, TILE * 0.5, TILE * 0.46, 3);   // 右上: 3本腕の渦巻
+  drawElliptical(ctx, TILE * 0.5, TILE * 1.5, TILE * 0.4);   // 左下: 楕円銀河
+  drawIrregular(ctx, TILE * 1.5, TILE * 1.5, TILE * 0.4);    // 右下: 不規則銀河
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function blob(ctx, x, y, r, alpha, hue = '255,255,255') {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${hue},${alpha})`);
+  g.addColorStop(1, `rgba(${hue},0)`);
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+function drawSpiral(ctx, cx, cy, R, arms) {
+  // 中心のバルジ
+  blob(ctx, cx, cy, R * 0.28, 1.0, '255,245,220');
+  blob(ctx, cx, cy, R * 0.5, 0.35, '255,238,205');
+  // 対数螺旋の腕に沿って星の塊をばらまく
+  for (let arm = 0; arm < arms; arm++) {
+    const base = (arm / arms) * Math.PI * 2;
+    for (let s = 0; s < 260; s++) {
+      const t = s / 260;
+      const theta = base + t * Math.PI * 1.9;
+      const r = R * (0.12 + 0.88 * Math.pow(t, 0.85));
+      const jitter = R * 0.05 * (1 + t);
+      const x = cx + Math.cos(theta) * r + (Math.random() - 0.5) * jitter;
+      const y = cy + Math.sin(theta) * r + (Math.random() - 0.5) * jitter;
+      const fade = 1 - t * 0.55;
+      blob(ctx, x, y, R * (0.02 + Math.random() * 0.05), 0.1 * fade, '225,235,255');
+      if (Math.random() < 0.1) blob(ctx, x, y, R * 0.015, 0.5 * fade); // 明るい星形成領域
+    }
+  }
+  // 円盤全体のうっすらした光
+  blob(ctx, cx, cy, R, 0.1, '210,225,255');
+}
+
+function drawElliptical(ctx, cx, cy, R) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, 0.78);
+  blob(ctx, 0, 0, R * 0.3, 1.0, '255,240,215');
+  blob(ctx, 0, 0, R * 0.65, 0.4, '255,235,205');
+  blob(ctx, 0, 0, R, 0.18, '250,230,205');
+  ctx.restore();
+}
+
+function drawIrregular(ctx, cx, cy, R) {
+  for (let n = 0; n < 26; n++) {
+    const ang = Math.random() * Math.PI * 2;
+    const d = Math.pow(Math.random(), 1.4) * R * 0.75;
+    const x = cx + Math.cos(ang) * d;
+    const y = cy + Math.sin(ang) * d * 0.8;
+    blob(ctx, x, y, R * (0.08 + Math.random() * 0.16), 0.25 + Math.random() * 0.3, '220,232,255');
+  }
+  blob(ctx, cx, cy, R * 0.5, 0.3, '235,240,255');
 }
 
 // ---------- スプライト ----------

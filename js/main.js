@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js?v=6';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=6';
-import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=6';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=7';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=7';
+import { createUniverse, epochInfo, formatUniverseTime, NOW_GYR, END_GYR } from './universe.js?v=7';
 
 // ---------- レンダラー ----------
 const canvas = document.getElementById('view');
@@ -41,7 +41,7 @@ const universeCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.
 universeCam.position.set(0, 35, 85);
 const universeControls = new OrbitControls(universeCam, canvas);
 universeControls.enableDamping = true;
-universeControls.minDistance = 8;
+universeControls.minDistance = 0.3; // 銀河1つ1つに寄れる
 universeControls.maxDistance = 500;
 universeControls.enabled = false;
 
@@ -57,16 +57,27 @@ let universeS = 0;           // 宇宙の歴史スライダー位置 (0〜1)
 let followKey = null;        // 追従中の天体キー
 const BASE_DATE = new Date(); // 「現在」の基準
 
-// 宇宙の歴史スライダー: 前半は対数(ビッグバン直後の一瞬を引き伸ばす)、
-// 後半(10億年〜238億年)は線形
+// 宇宙の歴史スライダー:
+//   [0, U_FLASH]   … 誕生の瞬間(無 → ビッグバンの閃光)
+//   [U_FLASH, U_SPLIT] … 対数スケール(最初の3分〜10億年の大事件を引き伸ばす)
+//   [U_SPLIT, 1]   … 線形(10億年〜238億年)
+const U_FLASH = 0.05;
 const U_SPLIT = 0.45;
 const U_LOG_MIN = -15;       // 10^-15 十億年 ≈ 30秒
 function sliderToGyr(s) {
-  if (s <= U_SPLIT) return Math.pow(10, U_LOG_MIN + (s / U_SPLIT) * (0 - U_LOG_MIN));
+  if (s <= 0) return 0; // 宇宙誕生前の「無」
+  if (s <= U_FLASH) return Math.pow(10, -19 + (s / U_FLASH) * 4); // 閃光ゾーン
+  if (s <= U_SPLIT) {
+    return Math.pow(10, U_LOG_MIN + ((s - U_FLASH) / (U_SPLIT - U_FLASH)) * (0 - U_LOG_MIN));
+  }
   return 1 + ((s - U_SPLIT) / (1 - U_SPLIT)) * (END_GYR - 1);
 }
 function gyrToSlider(t) {
-  if (t <= 1) return U_SPLIT * (Math.log10(Math.max(t, 1e-15)) - U_LOG_MIN) / (0 - U_LOG_MIN);
+  if (t <= 0) return 0;
+  if (t <= 1e-15) return U_FLASH * (Math.log10(Math.max(t, 1e-19)) + 19) / 4;
+  if (t <= 1) {
+    return U_FLASH + (U_SPLIT - U_FLASH) * (Math.log10(t) - U_LOG_MIN) / (0 - U_LOG_MIN);
+  }
   return U_SPLIT + ((t - 1) / (END_GYR - 1)) * (1 - U_SPLIT);
 }
 
