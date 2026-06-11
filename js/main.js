@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createGalaxy, createBackgroundStars } from './galaxy.js?v=4';
-import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=4';
+import { createGalaxy, createBackgroundStars } from './galaxy.js?v=5';
+import { SolarSystem, POS_SCALE, EARTH_MASS } from './solarsystem.js?v=5';
 
 // ---------- レンダラー ----------
 const canvas = document.getElementById('view');
@@ -229,16 +229,18 @@ function refreshPanel() {
   const planetEditable = !isSun && b.alive;
   distField.classList.toggle('hidden', !planetEditable);
   circularizeBtn.classList.toggle('hidden', !planetEditable);
-  swapField.classList.toggle('hidden', !planetEditable);
+  swapField.classList.toggle('hidden', !b.alive);
   if (planetEditable) {
     const r = b.pos.distanceTo(solar.bodies[0].pos);
     distSlider.value = Math.log10(Math.max(r, 0.05));
     distValue.textContent = `${r.toFixed(2)} AU`;
-    // 入れ替え相手のセレクトを作り直す(自分と太陽と消滅した惑星は除く)
+  }
+  if (b.alive) {
+    // 入れ替え相手のセレクトを作り直す(自分と消滅した惑星は除く。太陽も選べる)
     const prev = swapSelect.value;
     swapSelect.innerHTML = '';
     for (const other of solar.bodies) {
-      if (other.key === 'sun' || other.key === b.key || !other.alive) continue;
+      if (other.key === b.key || !other.alive) continue;
       const opt = document.createElement('option');
       opt.value = other.key;
       opt.textContent = other.name;

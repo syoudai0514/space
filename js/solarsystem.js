@@ -326,8 +326,9 @@ export class SolarSystem {
     this.clearTrail(key);
   }
 
-  // 2つの惑星の位置と速度をまるごと交換する。
-  // 公転速度は惑星自身の質量にほぼよらないので、円軌道どうしなら安定したまま
+  // 2つの天体(太陽も可)の位置と速度をまるごと交換する。
+  // 惑星どうしなら公転速度は質量にほぼよらないので円軌道のまま。
+  // 太陽と入れ替えると重力の中心が移動し、太陽系全体が組み変わっていく
   swapBodies(keyA, keyB) {
     const a = this.getBody(keyA);
     const b = this.getBody(keyB);
@@ -339,8 +340,25 @@ export class SolarSystem {
     a.vel.copy(b.vel);
     b.vel.copy(v);
     [a.escaped, b.escaped] = [b.escaped, a.escaped];
+    // 太陽との入れ替えで系全体が画面外へ流れていかないよう、
+    // 全体の運動量を打ち消す(相対的な運動は変わらない)
+    this._zeroMomentum();
     this.clearTrail(keyA);
     this.clearTrail(keyB);
+  }
+
+  _zeroMomentum() {
+    const drift = new THREE.Vector3();
+    let total = 0;
+    for (const b of this.bodies) {
+      if (!b.alive) continue;
+      drift.addScaledVector(b.vel, this.effMass(b));
+      total += this.effMass(b);
+    }
+    drift.divideScalar(total); // 重心の速度
+    for (const b of this.bodies) {
+      if (b.alive) b.vel.sub(drift);
+    }
   }
 
   // ドラッグ移動: 表示座標で位置を直接指定(速度はそのまま)
